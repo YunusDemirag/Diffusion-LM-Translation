@@ -498,9 +498,9 @@ def get_corpus_rocstory(data_args, model, image_size, padding_mode='block',
                             sentences = row.strip()
                             word_lst = [x.text for x in tokenizer(sentences)]
                             spl = [[]]
-                            for x, y in itertools.groupby(word_lst, lambda z: z == '.'):
-                                spl[-1].extend(y)
-                                if x: spl.append([])
+                            for token_is_dot, token_list in itertools.groupby(word_lst, lambda z: z == '.'):
+                                spl[-1].extend(token_list)
+                                if token_is_dot: spl.append([])
                             sentence_lst.extend(spl[:-1])
                 else:
                     with open(path, 'r') as roc_reader:
@@ -508,9 +508,9 @@ def get_corpus_rocstory(data_args, model, image_size, padding_mode='block',
                             sentences = json.loads(row)[0].strip()
                             word_lst = [x.text for x in tokenizer(sentences)]
                             spl = [[]]
-                            for x, y in itertools.groupby(word_lst, lambda z: z == '.'):
-                                spl[-1].extend(y)
-                                if x: spl.append([])
+                            for token_is_dot, token_list in itertools.groupby(word_lst, lambda z: z == '.'):
+                                spl[-1].extend(token_list)
+                                if token_is_dot: spl.append([])
                             sentence_lst.extend(spl[:-1])
 
             print(sentence_lst[-2:])
@@ -723,17 +723,18 @@ def get_corpus_book(data_args, tokenizer, model, image_size, padding_mode='block
 class TextDataset(Dataset):
     def __init__(self, text_datasets, resolution, data_args, model_arch='conv-unet',
                  classes=None, shard=0, num_shards=1, eigen_transform=None,
-                 mapping_func=None, model_emb=None):
+                 mapping_func=None, model_emb=None, split='train'):
         super().__init__()
         self.resolution = resolution
         self.text_datasets = text_datasets
-        self.length = len(self.text_datasets['train'])
+        self.length = len(self.text_datasets[split])
         self.model_arch = model_arch
         self.data_args = data_args
         print(self.resolution)
         self.eigen_transform = eigen_transform
         self.mapping_func = mapping_func
         self.model_emb = model_emb
+        self.split = split
         # self.local_images = image_paths[shard:][::num_shards]
         # self.local_classes = None if classes is None else classes[shard:][::num_shards]
 
@@ -746,7 +747,7 @@ class TextDataset(Dataset):
         # argument, which uses BOX downsampling at powers of two first.
         # Thus, we do it by hand to improve downsample quality.
         if self.model_arch == 'conv-unet':
-            arr = np.array(self.text_datasets['train'][idx]['hidden_states'],
+            arr = np.array(self.text_datasets[self.split][idx]['hidden_states'],
                            dtype=np.float32).reshape(self.resolution, self.resolution, -1)
             # print(self.eigen_transform.shape)
             if self.eigen_transform  is not None:
@@ -759,13 +760,13 @@ class TextDataset(Dataset):
 
 
             out_dict = {}
-            out_dict['input_ids'] = np.array(self.text_datasets['train'][idx]['input_ids'])
+            out_dict['input_ids'] = np.array(self.text_datasets[self.split][idx]['input_ids'])
             # if self.local_classes is not None:
             #     out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
             # print(out_dict.keys())
             return np.transpose(arr, [2, 0, 1]), out_dict
         elif self.model_arch == '1d-unet':
-            arr = np.array(self.text_datasets['train'][idx]['hidden_states'],
+            arr = np.array(self.text_datasets[self.split][idx]['hidden_states'],
                            dtype=np.float32) # seqlen, dim
             if self.eigen_transform  is not None:
                 old_shape = arr.shape
@@ -776,14 +777,14 @@ class TextDataset(Dataset):
                 arr = arr + self.data_args.noise_level * np.random.randn(*arr.shape).astype(arr.dtype)
             arr = np.transpose(arr, [1, 0])
             out_dict = {}
-            out_dict['input_ids'] = np.array(self.text_datasets['train'][idx]['input_ids'])
+            out_dict['input_ids'] = np.array(self.text_datasets[self.split][idx]['input_ids'])
             # out_dict['mapping_func'] = self.mapping_func
             # if self.local_classes is not None:
             #     out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
             # print(arr.shape)
             return arr, out_dict
         else:
-            arr = np.array(self.text_datasets['train'][idx]['hidden_states'],
+            arr = np.array(self.text_datasets[self.split][idx]['hidden_states'],
                            dtype=np.float32)
             if self.eigen_transform  is not None:
                 old_shape = arr.shape
@@ -799,11 +800,11 @@ class TextDataset(Dataset):
                 # print(arr.dtype)
 
             out_dict = {}
-            out_dict['input_ids'] = np.array(self.text_datasets['train'][idx]['input_ids'])
+            out_dict['input_ids'] = np.array(self.text_datasets[self.split][idx]['input_ids'])
             # out_dict['mapping_func'] = self.mapping_func
             if self.data_args.experiment_mode == 'conditional_gen':
-                out_dict['src_ids'] = np.array(self.text_datasets['train'][idx]['src_ids'])
-                out_dict['src_mask'] = np.array(self.text_datasets['train'][idx]['src_mask'])
+                out_dict['src_ids'] = np.array(self.text_datasets[self.split][idx]['src_ids'])
+                out_dict['src_mask'] = np.array(self.text_datasets[self.split][idx]['src_mask'])
             # if self.local_classes is not None:
             #     out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
             return arr, out_dict
@@ -815,17 +816,18 @@ class TextDataset(Dataset):
 class TextDataset_NoCache(Dataset):
     def __init__(self, text_datasets, resolution, data_args, model_arch='conv-unet',
                  classes=None, shard=0, num_shards=1, eigen_transform=None,
-                 mapping_func=None, model_emb=None):
+                 mapping_func=None, model_emb=None, split='train'):
         super().__init__()
         self.resolution = resolution
         self.text_datasets = text_datasets
-        self.length = len(self.text_datasets['train'])
+        self.length = len(self.text_datasets[split])
         self.model_arch = model_arch
         self.data_args = data_args
         print(self.resolution)
         self.eigen_transform = eigen_transform
         self.mapping_func = mapping_func
         self.model_emb = model_emb
+        self.split = split
         # self.local_images = image_paths[shard:][::num_shards]
         # self.local_classes = None if classes is None else classes[shard:][::num_shards]
 
@@ -838,15 +840,15 @@ class TextDataset_NoCache(Dataset):
         # argument, which uses BOX downsampling at powers of two first.
         # Thus, we do it by hand to improve downsample quality.
         with torch.no_grad():
-            input_ids = self.text_datasets['train'][idx]['input_ids']
+            input_ids = self.text_datasets[self.split][idx]['input_ids']
             model = self.model_emb
-            if self.data_args.experiment.startswith('random'):
+            if self.data_args.experiment.startswith('random') or self.data_args.experiment=='translation':
                 hidden_state = model(torch.tensor(input_ids))
             elif self.data_args.experiment == 'gpt2_pre_compress':
                 input_ids2 = torch.tensor(input_ids).to(model.device)
                 input_embs = model.transformer.wte(input_ids2)  # input_embs
                 hidden_state = model.down_proj(input_embs)
-                hidden_state = hidden_state * data_args.emb_scale_factor
+                hidden_state = hidden_state * self.data_args.emb_scale_factor
 
             if self.model_arch == 'conv-unet':
                 arr = np.array(hidden_state,
@@ -861,7 +863,7 @@ class TextDataset_NoCache(Dataset):
                     arr = arr + self.data_args.noise_level * np.random.randn(*arr.shape).astype(arr.dtype)
 
                 out_dict = {}
-                out_dict['input_ids'] = np.array(self.text_datasets['train'][idx]['input_ids'])
+                out_dict['input_ids'] = np.array(self.text_datasets[self.split][idx]['input_ids'])
                 # if self.local_classes is not None:
                 #     out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
                 # print(out_dict.keys())
@@ -878,7 +880,7 @@ class TextDataset_NoCache(Dataset):
                     arr = arr + self.data_args.noise_level * np.random.randn(*arr.shape).astype(arr.dtype)
                 arr = np.transpose(arr, [1, 0])
                 out_dict = {}
-                out_dict['input_ids'] = np.array(self.text_datasets['train'][idx]['input_ids'])
+                out_dict['input_ids'] = np.array(self.text_datasets[self.split][idx]['input_ids'])
                 # out_dict['mapping_func'] = self.mapping_func
                 # if self.local_classes is not None:
                 #     out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
@@ -901,11 +903,11 @@ class TextDataset_NoCache(Dataset):
                     # print(arr.dtype)
 
                 out_dict = {}
-                out_dict['input_ids'] = np.array(self.text_datasets['train'][idx]['input_ids'])
+                out_dict['input_ids'] = np.array(self.text_datasets[self.split][idx]['input_ids'])
                 # out_dict['mapping_func'] = self.mapping_func
                 if self.data_args.experiment_mode == 'conditional_gen':
-                    out_dict['src_ids'] = np.array(self.text_datasets['train'][idx]['src_ids'])
-                    out_dict['src_mask'] = np.array(self.text_datasets['train'][idx]['src_mask'])
+                    out_dict['src_ids'] = np.array(self.text_datasets[self.split][idx]['src_ids'])
+                    out_dict['src_mask'] = np.array(self.text_datasets[self.split][idx]['src_mask'])
                 # if self.local_classes is not None:
                 #     out_dict["y"] = np.array(self.local_classes[idx], dtype=np.int64)
                 return arr, out_dict
