@@ -10,6 +10,7 @@ import math
 
 import numpy as np
 import torch as th
+import torch.nn as nn
 
 from .nn import mean_flat
 from .losses import normal_kl, discretized_gaussian_log_likelihood, discretized_text_log_likelihood
@@ -235,7 +236,19 @@ class GaussianDiffusion:
         # else:
         #     self.training_losses = self.training_losses_emb
 
-    def training_losses(self, model, *args, **kwargs):
+    def training_losses(self, model: nn.Module, *args, **kwargs):
+        """
+        Compute training losses for a single timestep.
+
+        :param model: the model to evaluate loss on.
+        :param x_start: the [N x C x ...] tensor of inputs.
+        :param t: a batch of timestep indices.
+        :param model_kwargs: if not None, a dict of extra keyword arguments to
+            pass to the model. This can be used for conditioning.
+        :param noise: if specified, the specific Gaussian noise to try to remove.
+        :return: a dict with the key "loss" containing a tensor of shape [N].
+                 Some mean or variance settings may also have other keys.
+        """
         if self.training_mode == 'e2e':
             return self.training_losses_e2e(model, *args, **kwargs)
         elif self.training_mode == 'e2e-simple':
@@ -1301,7 +1314,7 @@ class GaussianDiffusion:
         output = kl + decoder_nll + kl_T 
         return {"output": output, "pred_xstart": out["pred_xstart"], 'kl': kl, 'decoder_nll':decoder_nll, 'kl_T':kl_T}
 
-    def training_losses_emb(self, model, x_start, t, model_kwargs=None, noise=None):
+    def training_losses_emb(self, model: nn.Module, x_start: th.Tensor, t: th.Tensor, model_kwargs=None, noise=None):
         """
         Compute training losses for a single timestep.
 
@@ -1452,7 +1465,7 @@ class GaussianDiffusion:
         return {'pred_xprev':pred_prev, 'pred_xstart':pred_xstart}
 
 
-    def training_losses_e2e(self, model, x_start, t, model_kwargs=None, noise=None):
+    def training_losses_e2e(self, model: nn.Module, x_start: th.Tensor, t: th.Tensor, model_kwargs: "dict[str,th.Tensor]"=None, noise=None):
         """
         Compute training losses for a single timestep.
 

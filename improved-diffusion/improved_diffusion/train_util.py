@@ -1,13 +1,19 @@
 import copy
 import functools
 import os
-
+from typing import Generator, Sequence, Tuple, Type
+import typing
+from torch import Tensor
+from .gaussian_diffusion import GaussianDiffusion
 import blobfile as bf
 import numpy as np
 import torch as th
 import torch.distributed as dist
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.optim import AdamW
+import  torch.nn as nn
+
+Batch = Tensor
 
 from . import dist_util, logger
 from .fp16_util import (
@@ -30,25 +36,25 @@ class TrainLoop:
     def __init__(
         self,
         *,
-        model,
-        diffusion,
-        data,
-        batch_size,
-        microbatch,
-        lr,
-        ema_rate,
-        log_interval,
-        save_interval,
-        resume_checkpoint,
-        use_fp16=False,
-        fp16_scale_growth=1e-3,
-        schedule_sampler=None,
-        weight_decay=0.0,
-        lr_anneal_steps=0,
-        checkpoint_path='',
-        gradient_clipping=-1.,
-        eval_data=None,
-        eval_interval=-1,
+        model: nn.Module,
+        diffusion: GaussianDiffusion,
+        data : "Generator[Tuple[Batch, dict[str, Batch]], None, None]",
+        batch_size : int,
+        microbatch : int,
+        lr : float,
+        ema_rate : float,
+        log_interval : int,
+        save_interval : int,
+        resume_checkpoint : bool,
+        use_fp16 : bool = False,
+        fp16_scale_growth : float = 1e-3,
+        schedule_sampler : bool = None,
+        weight_decay : float = 0.0,
+        lr_anneal_steps : int = 0,
+        checkpoint_path : str = '',
+        gradient_clipping : int = -1.,
+        eval_data : bool = None,
+        eval_interval : int = -1,
     ):
         self.model = model
         self.diffusion = diffusion
@@ -230,22 +236,22 @@ class TrainLoop:
                 )
 
 
-    def forward_backward(self, batch, cond):
+    def forward_backward(self, batch: th.Tensor, conditions: "dict[str,th.Tensor]"):
         zero_grad(self.model_params)
         for i in range(0, batch.shape[0], self.microbatch):
-            micro = batch[i : i + self.microbatch].to(dist_util.dev())
+            microbatch = batch[i : i + self.microbatch].to(dist_util.dev())
             micro_cond = {
                 k: v[i : i + self.microbatch].to(dist_util.dev())
-                for k, v in cond.items()
+                for k, v in conditions.items()
             }
             last_batch = (i + self.microbatch) >= batch.shape[0]
-            t, weights = self.schedule_sampler.sample(micro.shape[0], dist_util.dev())
+            timesteps, weights = self.schedule_sampler.sample(microbatch.shape[0], dist_util.dev())
             # print(micro_cond.keys())
             compute_losses = functools.partial(
                 self.diffusion.training_losses,
                 self.ddp_model,
-                micro,
-                t,
+                microbatch,
+                timesteps,
                 model_kwargs=micro_cond,
             )
 
@@ -257,12 +263,12 @@ class TrainLoop:
 
             if isinstance(self.schedule_sampler, LossAwareSampler):
                 self.schedule_sampler.update_with_local_losses(
-                    t, losses["loss"].detach()
+                    timesteps, losses["loss"].detach()
                 )
 
             loss = (losses["loss"] * weights).mean()
             log_loss_dict(
-                self.diffusion, t, {k: v * weights for k, v in losses.items()}
+                self.diffusion, timesteps, {k: v * weights for k, v in losses.items()}
             )
             if self.use_fp16:
                 loss_scale = 2 ** self.lg_loss_scale
