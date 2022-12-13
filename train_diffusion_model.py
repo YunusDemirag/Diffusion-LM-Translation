@@ -171,7 +171,7 @@ with open(f'{PARAMS["checkpoint_path"]}/training_args.json', 'w') as hyperparams
 logger.log("creating data loader...")
 print('load data', '*'*50)
 
-tokenizer: 'Tokenizer' = Tokenizer.from_file(f'{COVOST_PATH}/tokenizer.json')
+tokenizer: 'Tokenizer' = Tokenizer.from_file(f'{COVOST_PATH}/tokenizer_{PARAMS.vocab_size}.json')
 
 embedding_model = torch.nn.Embedding(tokenizer.get_vocab_size(), PARAMS['in_channel'])
 
