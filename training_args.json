@@ -15,5 +15,6 @@
     "training_mode": "e2e",
     "notes": "xstart_e2e",
     "batch_size": 64,
-    "vocab_size": 30000
+    "vocab_size": 30000,
+    "gpu_index":1
 }

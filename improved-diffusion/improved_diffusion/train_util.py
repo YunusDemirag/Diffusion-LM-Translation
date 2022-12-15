@@ -45,7 +45,7 @@ class TrainLoop:
         ema_rate : float,
         log_interval : int,
         save_interval : int,
-        resume_checkpoint : bool,
+        resume_checkpoint : str,
         use_fp16 : bool = False,
         fp16_scale_growth : float = 1e-3,
         schedule_sampler : bool = None,
