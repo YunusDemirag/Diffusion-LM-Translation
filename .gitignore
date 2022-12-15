@@ -2,3 +2,4 @@ classifier_models
 .vscode
 wandb
 covost
+training_args.json
