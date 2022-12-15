@@ -20,6 +20,7 @@ parser = argparse.ArgumentParser(description="This script trains a diffusion mod
 
 parser.add_argument('-resume_model', help='The model directory')
 parser.add_argument('-resume_checkpoint', help='The checkpoint you want to continue from')
+parser.add_argument('-run_id', help="WAND Run ID", required=False)
 
 args = parser.parse_args()
 
@@ -158,14 +159,6 @@ data_loaders = create_data_loaders()
 
 embedding_model_cuda = embedding_model.cuda()
 
-def set_mapping_func(args, diffusion):
-    '''This mapping func is a parameter in the diffusion instance that will enable it to jointly train the embeddings'''
-    print(f'Embedding model: {embedding_model}\n Requires Grad: {embedding_model.weight.requires_grad}')
-    mapping_func = partial(compute_logp, args, embedding_model_cuda)
-    diffusion.mapping_func = mapping_func
-
-set_mapping_func(PARAMS, diffusion)
-
 def training_params(
     batch_size, 
     microbatch, 
@@ -200,7 +193,8 @@ def training_params(
 wandb.init(
     project=os.getenv("WANDB_PROJECT", "diffusion_lm"),
     name=PARAMS['checkpoint_path'],
-    resume=True
+    resume=True,
+    id=args.run_id
 )
 
 logger.log("resuming training...")
