@@ -1,0 +1,9 @@
+{
+    "model_file":"model002000.pt",
+    "tokenizer": "./covost-dataset/tokenizer.json",
+    "batch_size":64,
+    "seqlen":64,
+    "clip_denoised": false,
+    "eta": 1.0,
+    "top_p":-1.0
+}

@@ -834,20 +834,41 @@ class TransformerNetModel2(nn.Module):
     #     return next(self.input_blocks.parameters()).dtype
 
     def get_embeds(self, input_ids):
+        '''
+        Gives out the Embedding of an Id \n
+        Arguments:
+            input_ids: Ids to embedd
+        Returns:
+            ID Embeddings
+        '''
         return self.word_embedding(input_ids)
 
     def get_logits(self, hidden_repr):
+        '''
+        Predicts the probabilities of the various tokens for a hidden_representation of a token \n
+        Arguments:
+            hidden_repr: hidden_representation to decode (shape: bsz, seqlen, embedding_dim)
+        Returns:
+            Prediction logits (per token)
+        '''
         if self.logits_mode == 1:
             return self.lm_head(hidden_repr)
         elif self.logits_mode == 2:
-            text_emb = hidden_repr
-            emb_norm = (self.lm_head.weight ** 2).sum(-1).view(-1, 1)  # vocab
-            text_emb_t = th.transpose(text_emb.view(-1, text_emb.size(-1)), 0, 1)  # d, bsz*seqlen
-            arr_norm = (text_emb ** 2).sum(-1).view(-1, 1)  # bsz*seqlen, 1
-            dist = emb_norm + arr_norm.transpose(0, 1) - 2.0 * th.mm(self.lm_head.weight,
-                                                                     text_emb_t)  # (vocab, d) x (d, bsz*seqlen)
-            scores = th.sqrt(th.clamp(dist, 0.0, np.inf)).view(emb_norm.size(0), hidden_repr.size(0),
-                                                               hidden_repr.size(1)) # vocab, bsz*seqlen
+            embedding_dimension = hidden_repr.size(-1)
+            hidden_representations_all_sequences_appended = hidden_repr.view(-1, embedding_dimension) # bsz*seqlen, d
+            hidden_representations_all_sequences_appended_transposed = th.transpose(hidden_representations_all_sequences_appended, 0, 1)  # d, bsz*seqlen
+
+            scalars_p2_hr_hr = (hidden_repr ** 2).sum(-1)
+            scalars_p2_hr_hr_all_sequences_appended = scalars_p2_hr_hr.view(-1, 1)  # bsz*seqlen, 1
+            scalars_hr_hr = scalars_p2_hr_hr_all_sequences_appended.transpose(0, 1) # 1, bsz*seqlen
+            
+            embeddings = self.lm_head.weight # vocab_size, d
+            scalars_emb_emb = (embeddings ** 2).sum(-1).view(-1, 1)  # vocab_size, 1
+
+            scalars_emb_hr = th.mm(embeddings, hidden_representations_all_sequences_appended_transposed) # vocab_size, bsz*seqlen
+
+            dist = scalars_emb_emb + scalars_hr_hr - 2.0 * scalars_emb_hr  # x_ij = <embj,embj> + <hri,hri> - 2 <embj,hri> = |embj-hri| ^ 2
+            scores = th.sqrt(th.clamp(dist, 0.0, np.inf)).view(scalars_emb_emb.size(0), hidden_repr.size(0), hidden_repr.size(1)) # vocab, bsz, seqlen
             scores = -scores.permute(1, 2, 0).contiguous()
 
             #

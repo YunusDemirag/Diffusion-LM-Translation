@@ -1,5 +1,6 @@
 import argparse
 import inspect
+import torch.nn as nn
 
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
@@ -131,7 +132,7 @@ def create_model(
     config_name='',
     experiment_mode='lm',
     logits_mode=1,
-):
+) -> nn.Module:
     print(f'creating model, based on {model_arch}')
     if model_arch == 'conv-unet':
         if image_size == 256:

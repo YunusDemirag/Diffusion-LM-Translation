@@ -3,3 +3,5 @@ classifier_models
 wandb
 covost
 training_args.json
+sampling_args.json
+*.ipynb
