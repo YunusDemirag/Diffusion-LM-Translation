@@ -57,9 +57,92 @@ model, diffusion = create_model_and_diffusion(
 )
 
 model.load_state_dict(torch.load(f'{PARAMS.model_path}/{PARAMS.model_file}'))
-model = model.to(cuda)
+model = model.cuda()
 
 embedding_model : nn.Embedding = model.word_embedding
+
+########### CREATING DATA LOADERS ############
+##############################################
+
+COVOST_PATH = "./covost-dataset"
+
+def create_data_loader():
+    '''Creating a function for this so that unnecessary data can be freed'''
+    from improved_diffusion.text_datasets import TextDataset_NoCache
+    from torch.utils.data import DataLoader
+
+    # As in Diffusion-LM
+    max_seq_len = PARAMS.image_size ** 2
+
+    from datasets import DatasetDict, Dataset
+    from improved_diffusion.text_datasets import _collate_batch_helper
+
+    data = DatasetDict()
+
+    for split in ["test"]:
+        pad_token_id = int(tokenizer.token_to_id('[PAD]'))
+        reader = open(f'{COVOST_PATH}/covost_v2.de_en.{split}.txt')
+
+        ## Skip Header
+        next(reader)
+
+        encoded = (tokenizer.encode(line).ids for line in reader)
+
+        ## Some lines might be too long. Can't split them up for translation.
+        def filtered():
+            num_dataset_valid_lines = 0
+            num_dataset_filtered_out_lines = 0
+            for encoding in encoded:
+                if len(encoding) < max_seq_len:
+                    num_dataset_valid_lines+=1
+                    yield encoding
+                else:
+                    num_dataset_filtered_out_lines+=1
+            num_lines = num_dataset_filtered_out_lines + num_dataset_valid_lines
+            print(f'Finished filtering the dataset lines: {num_dataset_filtered_out_lines} out of {num_lines} were too long. ({num_dataset_filtered_out_lines/num_lines*100}\%)')
+
+        encoded_dataset = Dataset.from_dict({
+            'input_ids':[ encoding  for encoding in filtered()]
+        })
+
+        def pad_function(group_lst):
+            group_lst['input_ids'] = _collate_batch_helper(group_lst['input_ids'], pad_token_id, max_seq_len)
+            return group_lst
+
+        padded_dataset = encoded_dataset.map(
+            pad_function,
+            batched=True,
+            num_proc=1,
+            desc=f'padding',
+        )
+
+        data[split]=padded_dataset
+
+        reader.close()
+
+    def data_generator(split, data):
+        dataset = TextDataset_NoCache(
+            data,
+            PARAMS.image_size,
+            PARAMS,
+            model_arch=PARAMS['model_arch'],
+            model_emb=embedding_model.cpu(),
+            split=split
+        )
+        dataloader = DataLoader(
+            dataset,
+            batch_size=PARAMS['batch_size'],  # 64,
+            drop_last=True,
+            shuffle=True,
+            num_workers=1,
+        )
+
+        while True:
+            yield from dataloader
+
+    return data_generator(split, data)
+
+data_loader = create_data_loader()
 
 ################## SAMPLING ##################
 ##############################################
@@ -71,46 +154,88 @@ model_kwargs = {}
 
 sample_shape = (PARAMS.batch_size, PARAMS.seqlen, PARAMS.in_channel, )
 
-sample: torch.Tensor = diffusion.p_sample_loop(
-    model,
-    sample_shape,
-    denoised_fn=partial(denoised_fn_round, PARAMS, embedding_model) if "clamp" in PARAMS.keys() and PARAMS.clamp == "clamp" else None,
-    clip_denoised=PARAMS['clip_denoised'],
-    model_kwargs=model_kwargs,
-    top_p = PARAMS.top_p,
-    device=cuda,
-    progress=True
-)
+output_file = open(f'{output_directory}/samples_e2e_decoded.txt', 'w')
 
-print(sample[0])
+json_encoder = json.JSONEncoder()
 
-################## DECODING ##################
-##############################################
+for batch in data_loader:
 
-import numpy as np
+    seperator_id: int = tokenizer.token_to_id('[SEP]')
+    batch_input_ids = torch.tensor(batch[1]["input_ids"], device=cuda)
+    encoded_reference_sequence = embedding_model.cuda()(batch_input_ids)
+    seperator_matrix_indices = (batch_input_ids == seperator_id).nonzero()
+    seperator_indices = seperator_matrix_indices[:,1]
+    seperator_indices_broadcasted = seperator_indices.broadcast_to(batch_input_ids.shape)
+    position_indices = torch.tensor(range(PARAMS.seqlen), device=cuda).broadcast_to(batch_input_ids.shape)
+    mask = (seperator_indices_broadcasted < position_indices)
 
-samples: np.ndarray = np.concatenate([sample.cpu().numpy()], axis=0)
+    sources_ids = batch_input_ids.clone().detach()
+    sources_ids[mask] = padding_token
 
-decoded_outputs = []
+    references_ids = batch_input_ids.clone().detach()
+    references_ids[~mask] = padding_token
 
-print(f'Decoding for e2e, Sample shape: {sample.shape}, Sample dtype: {sample.dtype}')
+    sample_generator = diffusion.p_sample_loop_progressive_infill(
+        model,
+        sample_shape,
+        encoded_reference_sequence,
+        mask,
+        denoised_fn=partial(denoised_fn_round, PARAMS, embedding_model.cuda()) if "clamp" in PARAMS.keys() and PARAMS.clamp == "clamp" else None,
+        clip_denoised=PARAMS['clip_denoised'],
+        model_kwargs=model_kwargs,
+        device=cuda,
+        progress=True,
+        greedy=False
+    )
 
-x_ts = torch.tensor(sample, device=cuda, dtype=torch.float32)
-'''As in paper, x_t is the final output of the diffusion'''
+    for final in sample_generator:
+        sample = final['sample']
 
-if PARAMS.model_arch == 'conv-unet':
-    x_ts = x_ts.view(x_ts.size(0), -1, x_ts.size(-1))
+    # The sampling apparently moves the model to the cpu
+    model = model.cuda()
 
-logits = model.get_logits(x_ts)  # bsz, seqlen, vocab_size | -|Hidden_Repr-Embedding|
-most_probable_tokens = torch.topk(logits, k=1, dim=-1) 
-indices = most_probable_tokens.indices # bsz, seqlen, 1
-print(indices[0])
-for seq in indices:
-    numpy_sequence = seq.cpu().numpy()
-    tokens = tokenizer.decode(numpy_sequence.squeeze(-1))
-    decoded_outputs.append(tokens)
+    ################## DECODING ##################
+    ##############################################
 
-decoded_outputs_in_lines = (decoded_output + '\n' for decoded_output in decoded_outputs)
+    import numpy as np
 
-with open(f'{output_directory}/samples_e2e_decoded.txt', 'w') as output_file:
-    output_file.writelines(decoded_outputs_in_lines)
+    samples: np.ndarray = np.concatenate([sample.cpu().numpy()], axis=0)
+
+    decoded_outputs = []
+
+    print(f'Decoding for e2e, Sample shape: {sample.shape}, Sample dtype: {sample.dtype}')
+
+    x_ts = torch.tensor(sample, device=cuda, dtype=torch.float32)
+    '''As in paper, x_t is the final output of the diffusion'''
+
+    if PARAMS.model_arch == 'conv-unet':
+        x_ts = x_ts.view(x_ts.size(0), -1, x_ts.size(-1))
+
+    logits = model.get_logits(x_ts)  # bsz, seqlen, vocab_size | -|Hidden_Repr-Embedding|
+    most_probable_tokens = torch.topk(logits, k=1, dim=-1) 
+    indices = most_probable_tokens.indices # bsz, seqlen, 1
+    indices[~mask] = padding_token # Replacing the source with padding so the translation is left
+    print(indices[0])
+    for seq in indices:
+        numpy_sequence = seq.cpu().numpy()
+        tokens = tokenizer.decode(numpy_sequence.squeeze(-1))
+        decoded_outputs.append(tokens)
+
+    references = (tokenizer.decode(reference_ids.cpu().numpy()) for reference_ids in references_ids)
+    sources = (tokenizer.decode(source_ids.cpu().numpy()) for source_ids in sources_ids)
+    recover_reference_source_texts = zip(decoded_outputs, references, sources)
+
+    output_objects = (
+        {
+            "recover": decoded_output,
+            "reference": reference,
+            "source":source
+        } for decoded_output, reference, source in recover_reference_source_texts
+    )
+
+    output_strings = (f'{json_encoder.encode(output_object)}\n' for output_object in output_objects)
+
+    output_file.writelines(output_strings)
+    output_file.flush()
+
+output_file.close()
