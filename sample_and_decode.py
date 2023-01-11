@@ -154,7 +154,8 @@ model_kwargs = {}
 
 sample_shape = (PARAMS.batch_size, PARAMS.seqlen, PARAMS.in_channel, )
 
-output_file = open(f'{output_directory}/samples_e2e_decoded.txt', 'w')
+output_file = open(f'{output_directory}/samples_translation_decoded.txt', 'w')
+raw_output_file = open(f'{output_directory}/samples_raw_decoded.txt', 'w')
 
 json_encoder = json.JSONEncoder()
 
@@ -214,8 +215,18 @@ for batch in data_loader:
     logits = model.get_logits(x_ts)  # bsz, seqlen, vocab_size | -|Hidden_Repr-Embedding|
     most_probable_tokens = torch.topk(logits, k=1, dim=-1) 
     indices = most_probable_tokens.indices # bsz, seqlen, 1
-    indices[~mask] = padding_token # Replacing the source with padding so the translation is left
+
+    decoded_outputs_raw = []
     print(indices[0])
+    for seq in indices:
+        numpy_sequence = seq.cpu().numpy()
+        tokens = tokenizer.decode(numpy_sequence.squeeze(-1))
+        decoded_outputs_raw.append(tokens)
+
+    raw_output_file.writelines((decoded_output_raw + '\n' for decoded_output_raw in decoded_outputs_raw))
+    raw_output_file.flush()
+
+    indices[~mask] = padding_token # Replacing the source with padding so the translation is left
     for seq in indices:
         numpy_sequence = seq.cpu().numpy()
         tokens = tokenizer.decode(numpy_sequence.squeeze(-1))
