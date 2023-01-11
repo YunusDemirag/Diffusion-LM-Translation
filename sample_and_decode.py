@@ -133,7 +133,7 @@ def create_data_loader():
             dataset,
             batch_size=PARAMS['batch_size'],  # 64,
             drop_last=True,
-            shuffle=True,
+            shuffle=False,
             num_workers=1,
         )
 
@@ -164,9 +164,9 @@ for batch in data_loader:
     batch_input_ids = torch.tensor(batch[1]["input_ids"], device=cuda)
     encoded_reference_sequence = embedding_model.cuda()(batch_input_ids)
     seperator_matrix_indices = (batch_input_ids == seperator_id).nonzero()
-    seperator_indices = seperator_matrix_indices[:,1]
-    seperator_indices_broadcasted = seperator_indices.broadcast_to(batch_input_ids.shape)
-    position_indices = torch.tensor(range(PARAMS.seqlen), device=cuda).broadcast_to(batch_input_ids.shape)
+    seperator_indices = seperator_matrix_indices[:,1:2]
+    seperator_indices_broadcasted = seperator_indices.expand(batch_input_ids.shape)
+    position_indices = torch.tensor(range(PARAMS.seqlen), device=cuda).expand(batch_input_ids.shape)
     mask = (seperator_indices_broadcasted < position_indices)
 
     sources_ids = batch_input_ids.clone().detach()
