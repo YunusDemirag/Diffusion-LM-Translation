@@ -120,25 +120,30 @@ def create_data_loader():
 
         reader.close()
 
+    # The dataloader handles data on the cpu, so we need to clone the embedding model
+    embedding_model_cpu = nn.Embedding(embedding_model.num_embeddings, embedding_model.embedding_dim)
+    embedding_model_cpu.load_state_dict(embedding_model.state_dict())
+    embedding_model_cpu.cpu()
+
     def data_generator(split, data):
         dataset = TextDataset_NoCache(
             data,
             PARAMS.image_size,
             PARAMS,
             model_arch=PARAMS['model_arch'],
-            model_emb=embedding_model.cpu(),
+            model_emb=embedding_model_cpu,
             split=split
         )
         dataloader = DataLoader(
             dataset,
             batch_size=PARAMS['batch_size'],  # 64,
-            drop_last=True,
+            drop_last=False,
             shuffle=False,
             num_workers=1,
         )
 
-        while True:
-            yield from dataloader
+        for batch in dataloader:
+            yield batch
 
     return data_generator(split, data)
 
@@ -161,6 +166,12 @@ json_encoder = json.JSONEncoder()
 
 for batch in data_loader:
 
+    ## Adjust sample shape to batch size (last batch might be smaller)
+    if batch[0].shape[0] != PARAMS.batch_size:
+        sample_shape_adjusted = (batch[0].shape[0], PARAMS.seqlen, PARAMS.in_channel, )
+    else:
+        sample_shape_adjusted = sample_shape
+
     seperator_id: int = tokenizer.token_to_id('[SEP]')
     batch_input_ids = torch.tensor(batch[1]["input_ids"], device=cuda)
     encoded_reference_sequence = embedding_model.cuda()(batch_input_ids)
@@ -178,7 +189,7 @@ for batch in data_loader:
 
     sample_generator = diffusion.p_sample_loop_progressive_infill(
         model,
-        sample_shape,
+        sample_shape_adjusted,
         encoded_reference_sequence,
         mask,
         denoised_fn=partial(denoised_fn_round, PARAMS, embedding_model.cuda()) if "clamp" in PARAMS.keys() and PARAMS.clamp == "clamp" else None,

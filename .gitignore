@@ -5,3 +5,5 @@ covost
 training_args.json
 sampling_args.json
 *.ipynb
+covost
+diffusion_models
