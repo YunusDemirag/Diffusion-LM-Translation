@@ -120,14 +120,12 @@ for i in tqdm(range(0, PARAMS.num_samples, PARAMS.batch_size)):
         x_ts = x_ts.view(x_ts.size(0), -1, x_ts.size(-1))
 
     logits = model.get_logits(x_ts)  # bsz, seqlen, vocab_size | -|Hidden_Repr-Embedding|
-    most_probable_tokens = torch.topk(logits, k=1, dim=-1) 
-    indices = most_probable_tokens.indices # bsz, seqlen, 1
+    indices = torch.argmax(logits, dim=-1) # bsz, seqlen
 
     decoded_outputs_raw = []
-    print(indices[0])
     for seq in indices:
         numpy_sequence = seq.cpu().numpy()
-        tokens = tokenizer.decode(numpy_sequence.squeeze(-1))
+        tokens = tokenizer.decode(numpy_sequence)
         decoded_outputs_raw.append(tokens)
 
     raw_output_file.writelines((decoded_output_raw + '\n' for decoded_output_raw in decoded_outputs_raw))
