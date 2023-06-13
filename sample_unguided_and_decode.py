@@ -93,7 +93,6 @@ for i in tqdm(range(0, PARAMS.num_samples, PARAMS.batch_size)):
         model_kwargs=model_kwargs,
         device=cuda,
         progress=True,
-        greedy=False
     )
 
     for final in sample_generator:
