@@ -131,21 +131,23 @@ for i in tqdm(range(0, PARAMS.num_samples, PARAMS.batch_size)):
     raw_output_file.writelines((decoded_output_raw + '\n' for decoded_output_raw in decoded_outputs_raw))
     raw_output_file.flush()
 
-    mask = torch.zeros(indices.shape, dtype=torch.bool, device=cuda)
+    en_mask = torch.zeros(indices.shape, dtype=torch.bool, device=cuda)
+    de_mask = torch.zeros(indices.shape, dtype=torch.bool, device=cuda)
     seperator_id: int = tokenizer.token_to_id('[SEP]')
     seperator_matrix_indices = (indices == seperator_id).nonzero()
     position_indices = torch.tensor(range(PARAMS.seqlen), device=cuda)
     for (batch_index, seperator_index) in seperator_matrix_indices:
-        mask[batch_index] = (position_indices < seperator_index)
+        en_mask[batch_index] = position_indices > seperator_index
+        de_mask[batch_index] = position_indices < seperator_index
 
-    for seq in torch.where(~mask, indices, padding_token):
+    for seq in torch.where(en_mask, indices, padding_token):
         numpy_sequence = seq.cpu().numpy()
-        tokens = tokenizer.decode(numpy_sequence.squeeze(-1))
+        tokens = tokenizer.decode(numpy_sequence)
         decoded_en.append(tokens)
 
-    for seq in torch.where(mask, indices, padding_token):
+    for seq in torch.where(de_mask, indices, padding_token):
         numpy_sequence = seq.cpu().numpy()
-        tokens = tokenizer.decode(numpy_sequence.squeeze(-1))
+        tokens = tokenizer.decode(numpy_sequence)
         decoded_de.append(tokens)
 
     recover_reference_source_texts = zip(decoded_en, decoded_de)
