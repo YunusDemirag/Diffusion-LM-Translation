@@ -72,8 +72,8 @@ model_kwargs = {}
 
 sample_shape = (PARAMS.batch_size, PARAMS.seqlen, PARAMS.in_channel, )
 
-output_file = open(f'{output_directory}/samples_translation_decoded.txt', 'w')
-raw_output_file = open(f'{output_directory}/samples_raw_decoded.txt', 'w')
+output_file = open(f'{output_directory}/samples_unguided_translation_decoded.json', 'w')
+raw_output_file = open(f'{output_directory}/samples_unguided_raw_decoded.txt', 'w')
 
 json_encoder = json.JSONEncoder()
 
