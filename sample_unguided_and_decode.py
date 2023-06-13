@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch
 import json
 import argparse
-import tqdm
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser(
     prog="Sample and Decode",
